@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>✈️ MATH AIR STRIKE: MISI PENGURANGAN</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts & FontAwesome -->
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- MediaPipe Pose & Camera Utility -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            font-family: 'Rajdhani', sans-serif;
+            background-color: #030712;
+            color: #f3f4f6;
+            overflow: hidden;
+            user-select: none;
+        }
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+        /* Canvas layer ordering */
+        #webcam {
+            transform: scaleX(-1);
+            object-fit: cover;
+        }
+        .hud-glass {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+        .glow-text-cyan {
+            text-shadow: 0 0 10px rgba(6, 182, 212, 0.7), 0 0 20px rgba(6, 182, 212, 0.5);
+        }
+        .glow-text-yellow {
+            text-shadow: 0 0 10px rgba(234, 179, 8, 0.7), 0 0 20px rgba(234, 179, 8, 0.5);
+        }
+        .hud-border {
+            box-shadow: inset 0 0 15px rgba(59, 130, 246, 0.2);
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen flex flex-col justify-between items-center overflow-hidden">
+
+    <!-- HIDDEN WEBCAM VIDEO ELEMENT -->
+    <video id="webcam" class="absolute inset-0 w-full h-full opacity-0 pointer-events-none" playsinline></video>
+
+    <!-- GAME CANVAS (Renders Camera Mirror, Jet Fighter, Targets, Bullets, AR Visuals) -->
+    <canvas id="gameCanvas" class="absolute inset-0 w-full h-full z-0"></canvas>
+
+    <!-- UI OVERLAY LAYER -->
+    <div id="uiOverlay" class="relative z-10 w-full h-full flex flex-col justify-between p-4 md:p-6 pointer-events-none">
+        
+        <!-- TOP HUD: SCORE, MISSION QUESTION, LIVES & BOOST -->
+        <header id="topHud" class="w-full max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-center gap-3 transition-opacity duration-300 opacity-0">
+            <!-- Left Stats -->
+            <div class="hud-glass rounded-xl px-5 py-2.5 flex items-center gap-6 w-full md:w-auto justify-between border-cyan-500/40">
+                <div>
+                    <div class="text-xs font-bold text-cyan-400 tracking-wider">SKOR MISI</div>
+                    <div id="scoreText" class="text-3xl font-orbitron font-extrabold text-white glow-text-cyan">0</div>
+                </div>
+                <div>
+                    <div class="text-xs font-bold text-yellow-400 tracking-wider">LEVEL</div>
+                    <div id="levelText" class="text-2xl font-orbitron font-bold text-yellow-400">1</div>
+                </div>
+            </div>
+
+            <!-- Center Target Question -->
+        <div class="hud-glass rounded-2xl px-8 py-3 text-center border-2 border-cyan-400/60 shadow-lg shadow-cyan-500/20 w-full md:w-auto">
+            <div class="text-xs font-bold text-cyan-300 tracking-widest uppercase mb-1">TARGET PENGURANGAN (3 DIGIT)</div>
+            <div id="questionText" class="text-3xl md:text-5xl font-orbitron font-black text-white glow-text-cyan">
+                784 - 329 = ?
+            </div>
+        </div>
+            </div>
+
+            <!-- Right Stats: Health & Special Attack -->
+            <div class="hud-glass rounded-xl px-5 py-2.5 flex items-center gap-6 w-full md:w-auto justify-between border-cyan-500/40">
+                <div>
+                    <div class="text-xs font-bold text-rose-400 tracking-wider">NYAWA PESAWAT</div>
+                    <div id="livesContainer" class="flex gap-1.5 mt-1 text-xl text-rose-500">
+                        <i class="fa-solid fa-heart"></i>
+                        <i class="fa-solid fa-heart"></i>
+                        <i class="fa-solid fa-heart"></i>
+                    </div>
+                </div>
+                <div>
+                    <div class="text-xs font-bold text-amber-400 tracking-wider">SERANGAN ULTIMATE</div>
+                    <div class="w-24 bg-gray-800 rounded-full h-3 mt-1.5 overflow-hidden border border-amber-500/30">
+                        <div id="chargeBar" class="bg-gradient-to-r from-amber-500 to-yellow-300 h-full w-0 transition-all duration-200"></div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- CENTER GESTURE GUIDE / HUD STATUS -->
+        <div id="gestureStatusHUD" class="self-center my-auto text-center hud-glass px-6 py-2 rounded-full border border-cyan-500/30 text-cyan-300 text-sm font-semibold tracking-wide transition-opacity duration-300 opacity-0">
+            <span id="statusMessage"><i class="fa-solid fa-hand-point-up animate-pulse mr-2"></i> Posisikan tubuh di depan kamera</span>
+        </div>
+
+        <!-- BOTTOM HUD: CONTROL GUIDE CARDS -->
+        <footer id="bottomHud" class="w-full max-w-4xl mx-auto grid grid-cols-3 gap-3 md:gap-6 transition-opacity duration-300 opacity-0 text-center">
+            <div class="hud-glass p-3 rounded-xl border-cyan-500/30">
+                <i class="fa-solid fa-person-arrow-up-from-line text-cyan-400 text-xl mb-1"></i>
+                <div class="text-xs font-bold text-gray-200">KONTROL NAVIGASI</div>
+                <div class="text-[11px] text-cyan-300/80">Miringkan Tubuh / Bahu ke Kiri/Kanan & Naik/Turun</div>
+            </div>
+            <div class="hud-glass p-3 rounded-xl border-emerald-500/30">
+                <i class="fa-solid fa-hand-front text-emerald-400 text-xl mb-1"></i>
+                <div class="text-xs font-bold text-gray-200">TEMBAK PELURU</div>
+                <div class="text-[11px] text-emerald-300/80">Angkat Tangan Kanan Lebih Tinggi Dari Bahu</div>
+            </div>
+            <div class="hud-glass p-3 rounded-xl border-amber-500/30">
+                <i class="fa-solid fa-hand-fist text-amber-400 text-xl mb-1"></i>
+                <div class="text-xs font-bold text-gray-200">ULTIMATE BLAST</div>
+                <div class="text-[11px] text-amber-300/80">Silangkan Kedua Tangan di Depan Dada</div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- START / PERMISSION OVERLAY SCREEN -->
+    <div id="startScreen" class="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-md p-6 text-center">
+        <div class="max-w-xl w-full hud-glass p-8 rounded-3xl border-2 border-cyan-500/50 shadow-2xl shadow-cyan-500/20 flex flex-col items-center">
+            
+            <div class="w-20 h-20 bg-cyan-500/10 rounded-2xl flex items-center justify-center border border-cyan-400/40 mb-4 animate-bounce">
+                <i class="fa-solid fa-jet-fighter-up text-4xl text-cyan-400"></i>
+            </div>
+
+            <h1 class="text-3xl md:text-4xl font-orbitron font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-sky-200 to-indigo-400 tracking-wide mb-2">
+                MATH AIR STRIKE
+            </h1>
+            <p class="text-yellow-400 font-orbitron font-bold text-sm tracking-widest mb-6">MISI PENGURANGAN AR GESTURE</p>
+
+            <div class="bg-slate-900/80 rounded-2xl p-4 w-full text-left text-sm text-gray-300 space-y-3 mb-6 border border-slate-700/60">
+                <div class="flex items-center gap-3">
+                    <span class="w-7 h-7 rounded-full bg-cyan-500/20 text-cyan-400 font-bold flex items-center justify-center text-xs">1</span>
+                    <p>Izinkan akses kamera laptop / HP milikmu.</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="w-7 h-7 rounded-full bg-cyan-500/20 text-cyan-400 font-bold flex items-center justify-center text-xs">2</span>
+                    <p>Gerakkan tubuhmu ke kiri/kanan untuk kemudi pesawat tempur.</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="w-7 h-7 rounded-full bg-cyan-500/20 text-cyan-400 font-bold flex items-center justify-center text-xs">3</span>
+                    <p>Angkat tangan kanan untuk menembak balon angka hasil pengurangan yang benar!</p>
+                </div>
+            </div>
+
+            <button id="btnStart" class="pointer-events-auto w-full py-4 rounded-xl font-orbitron font-extrabold text-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/30 transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3">
+                <i class="fa-solid fa-camera"></i>
+                IZINKAN KAMERA & MULAI GAME
+            </button>
+            <p id="loadingStatus" class="text-xs text-cyan-400/80 mt-4 hidden font-mono">Memuat AI MediaPipe Pose Landmarker...</p>
+        </div>
+    </div>
+
+    <!-- GAME OVER SCREEN -->
+    <div id="gameOverScreen" class="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-md p-6 text-center hidden">
+        <div class="max-w-md w-full hud-glass p-8 rounded-3xl border-2 border-rose-500/50 shadow-2xl shadow-rose-500/20 flex flex-col items-center">
+            
+            <div class="w-20 h-20 bg-rose-500/10 rounded-2xl flex items-center justify-center border border-rose-400/40 mb-4">
+                <i class="fa-solid fa-triangle-exclamation text-4xl text-rose-500"></i>
+            </div>
+
+            <h2 class="text-3xl font-orbitron font-black text-rose-400 mb-1">MISI GAGAL!</h2>
+            <p class="text-xs text-gray-400 mb-6">Pesawat Tempurmu Mengalami Kerusakan Berat</p>
+
+            <div class="bg-slate-900/80 rounded-2xl p-5 w-full text-center mb-6 border border-slate-800">
+                <div class="text-xs text-gray-400 uppercase font-bold tracking-wider mb-1">SKOR AKHIR</div>
+                <div id="finalScore" class="text-4xl font-orbitron font-black text-cyan-400 glow-text-cyan">0</div>
+            </div>
+
+            <button id="btnRestart" class="pointer-events-auto w-full py-4 rounded-xl font-orbitron font-extrabold text-lg bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white shadow-lg shadow-rose-500/30 transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3">
+                <i class="fa-solid fa-rotate-right"></i>
+                COBA MISI LAGI
+            </button>
+        </div>
+    </div>
+
+    <!-- MAIN JAVASCRIPT LOGIC -->
+    <script>
+        /**
+         * MATH AIR STRIKE: MISI PENGURANGAN
+         * Single File HTML + Canvas + MediaPipe Pose AI + Web Audio Synthesizer
+         */
+
+        // Global Game Configuration & State Variables
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const webcamElement = document.getElementById('webcam');
+
+        let isGameRunning = false;
+        let score = 0;
+        let level = 1;
+        let lives = 3;
+        let chargePower = 0; // 0 to 100 for Ultimate Attack
+        
+        // Target Math Question State
+        let currentNum1 = 10;
+        let currentNum2 = 4;
+        let correctAnswer = 6;
+        
+        // Entity Arrays
+        let targets = [];
+        let bullets = [];
+        let particles = [];
+        let floatingTexts = [];
+
+        // Smooth Jet Fighter State (Interpolated)
+        const jet = {
+            x: 0,
+            y: 0,
+            targetX: 0,
+            targetY: 0,
+            width: 70,
+            height: 70,
+            angle: 0,
+            lastShootTime: 0
+        };
+
+        // Pose Recognition Coordinates (Mirrored Normalized 0-1)
+        let poseData = {
+            detected: false,
+            shoulderCenterX: 0.5,
+            shoulderCenterY: 0.5,
+            rightWrist: { x: 0, y: 0 },
+            leftWrist: { x: 0, y: 0 },
+            rightShoulder: { x: 0, y: 0 },
+            leftShoulder: { x: 0, y: 0 },
+            isRightHandRaised: false,
+            isCrossedHands: false
+        };
+
+        // Audio Context (Synthesizer sound effects without external audio files)
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playSound(type) {
+            if (!audioCtx) return;
+            try {
+                const now = audioCtx.currentTime;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                if (type === 'shoot') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(600, now);
+                    osc.frequency.exponentialRampToValueAtTime(100, now + 0.15);
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                    osc.start(now);
+                    osc.stop(now + 0.15);
+                } else if (type === 'hit') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(400, now);
+                    osc.frequency.exponentialRampToValueAtTime(800, now + 0.2);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                    osc.start(now);
+                    osc.stop(now + 0.2);
+                } else if (type === 'wrong') {
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(180, now);
+                    osc.frequency.setValueAtTime(120, now + 0.15);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                    osc.start(now);
+                    osc.stop(now + 0.3);
+                } else if (type === 'ultimate') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(200, now);
+                    osc.frequency.linearRampToValueAtTime(1000, now + 0.5);
+                    gain.gain.setValueAtTime(0.4, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+                    osc.start(now);
+                    osc.stop(now + 0.5);
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        // Window Canvas Resize
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            if (!isGameRunning) {
+                jet.x = canvas.width / 2;
+                jet.y = canvas.height * 0.8;
+                jet.targetX = jet.x;
+                jet.targetY = jet.y;
+            }
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // -------------------------------------------------------------
+        // MATH QUESTION GENERATOR
+        // -------------------------------------------------------------
+        function generateMathQuestion() {
+            // 3-digit subtraction logic (100-999)
+            // num1 is generated between 200 and 999
+            currentNum1 = Math.floor(Math.random() * 800) + 200;
+            // num2 is generated to be smaller than or equal to num1, minimum 100
+            currentNum2 = Math.floor(Math.random() * (currentNum1 - 100)) + 100;
+            correctAnswer = currentNum1 - currentNum2;
+
+            document.getElementById('questionText').innerText = `${currentNum1} - ${currentNum2} = ?`;
+
+            // Clear old target balloons & create new batch
+            targets = [];
+            const answerOptions = [correctAnswer];
+
+            // Generate 2 distinct realistic wrong answers close to the correct answer
+            while (answerOptions.length < 3) {
+                let delta = (Math.floor(Math.random() * 5) + 1) * 10 + (Math.floor(Math.random() * 5) + 1) * (Math.random() > 0.5 ? 1 : -1);
+                let wrongVal = correctAnswer + delta;
+                if (wrongVal >= 0 && !answerOptions.includes(wrongVal)) {
+                    answerOptions.push(wrongVal);
+                }
+            }
+
+            // Shuffle answers
+            answerOptions.sort(() => Math.random() - 0.5);
+
+            // Create target balloon objects falling from top
+            const spacing = canvas.width / 4;
+            answerOptions.forEach((val, index) => {
+                targets.push({
+                    x: spacing * (index + 1) + (Math.random() * 40 - 20),
+                    y: -100 - (index * 40),
+                    radius: 42,
+                    value: val,
+                    isCorrect: val === correctAnswer,
+                    speed: 1.0 + (level * 0.15) + Math.random() * 0.4,
+                    colorHue: (index * 120 + 180) % 360,
+                    wobble: Math.random() * Math.PI * 2
+                });
+            });
+        }
+
+        // -------------------------------------------------------------
+        // MEDIAPIPE POSE SETUP & DETECTION
+        // -------------------------------------------------------------
+        function initPoseDetection() {
+            const pose = new Pose({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+            });
+
+            pose.setOptions({
+                modelComplexity: 1,
+                smoothLandmarks: true,
+                enableSegmentation: false,
+                minDetectionConfidence: 0.6,
+                minTrackingConfidence: 0.6
+            });
+
+            pose.onResults(onPoseResults);
+
+            const camera = new Camera(webcamElement, {
+                onFrame: async () => {
+                    await pose.send({ image: webcamElement });
+                },
+                width: 1280,
+                height: 720
+            });
+
+            camera.start()
+                .then(() => {
+                    document.getElementById('loadingStatus').innerText = "Kamera & AI Siap! Memulai...";
+                    setTimeout(() => {
+                        document.getElementById('startScreen').classList.add('hidden');
+                        document.getElementById('topHud').classList.remove('opacity-0');
+                        document.getElementById('bottomHud').classList.remove('opacity-0');
+                        document.getElementById('gestureStatusHUD').classList.remove('opacity-0');
+                        isGameRunning = true;
+                        generateMathQuestion();
+                        requestAnimationFrame(gameLoop);
+                    }, 800);
+                })
+                .catch(err => {
+                    alert("Akses kamera ditolak atau tidak ditemukan. Mohon izinkan kamera untuk bermain.");
+                    console.error(err);
+                });
+        }
+
+        function onPoseResults(results) {
+            if (!results.poseLandmarks) {
+                poseData.detected = false;
+                document.getElementById('statusMessage').innerHTML = `<span class="text-amber-400"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Tubuh tidak terdeteksi kamera</span>`;
+                return;
+            }
+
+            poseData.detected = true;
+            document.getElementById('statusMessage').innerHTML = `<span class="text-emerald-400"><i class="fa-solid fa-circle-check mr-1"></i> AR Gesture Terhubung</span>`;
+
+            const lm = results.poseLandmarks;
+
+            // MediaPipe Landmarks: 11 = Left Shoulder, 12 = Right Shoulder, 15 = Left Wrist, 16 = Right Wrist
+            // Because webcam is mirrored horizontally, flip X coordinate: x_mirrored = 1.0 - x
+            const rightShoulder = { x: 1 - lm[12].x, y: lm[12].y };
+            const leftShoulder = { x: 1 - lm[11].x, y: lm[11].y };
+            const rightWrist = { x: 1 - lm[16].x, y: lm[16].y };
+            const leftWrist = { x: 1 - lm[15].x, y: lm[15].y };
+
+            // Shoulder midpoint for smooth jet positioning
+            const shoulderCenterX = (rightShoulder.x + leftShoulder.x) / 2;
+            const shoulderCenterY = (rightShoulder.y + leftShoulder.y) / 2;
+
+            poseData.shoulderCenterX = shoulderCenterX;
+            poseData.shoulderCenterY = shoulderCenterY;
+            poseData.rightWrist = rightWrist;
+            poseData.leftWrist = leftWrist;
+            poseData.rightShoulder = rightShoulder;
+            poseData.leftShoulder = leftShoulder;
+
+            // Mapping pose to screen space (with smooth boundaries)
+            jet.targetX = Math.max(50, Math.min(canvas.width - 50, shoulderCenterX * canvas.width));
+            jet.targetY = Math.max(100, Math.min(canvas.height - 80, shoulderCenterY * canvas.height * 1.2 - 50));
+
+            // Detect Right Hand Raised for Shooting
+            // Wrist higher than shoulder in screen coordinate space (smaller Y value)
+            poseData.isRightHandRaised = rightWrist.y < (rightShoulder.y - 0.08);
+
+            // Detect Crossed Arms for Ultimate Attack
+            const wristDistance = Math.hypot(rightWrist.x - leftWrist.x, rightWrist.y - leftWrist.y);
+            const handsNearChest = (rightWrist.y > rightShoulder.y) && (leftWrist.y > leftShoulder.y);
+            poseData.isCrossedHands = (wristDistance < 0.15) && handsNearChest;
+        }
+
+        // -------------------------------------------------------------
+        // SHOOTING & ULTIMATE ATTACK MECHANICS
+        // -------------------------------------------------------------
+        function fireBullet() {
+            const now = Date.now();
+            if (now - jet.lastShootTime > 180) { // Cooldown between shots
+                bullets.push({
+                    x: jet.x,
+                    y: jet.y - 35,
+                    vx: 0,
+                    vy: -14,
+                    color: '#06b6d4',
+                    isUltimate: false
+                });
+                playSound('shoot');
+                jet.lastShootTime = now;
+            }
+        }
+
+        function triggerUltimateAttack() {
+            if (chargePower >= 100) {
+                chargePower = 0;
+                document.getElementById('chargeBar').style.width = '0%';
+                
+                // Fire a cluster ring of super lasers
+                for (let i = -3; i <= 3; i++) {
+                    bullets.push({
+                        x: jet.x + (i * 15),
+                        y: jet.y - 40,
+                        vx: i * 2,
+                        vy: -16,
+                        color: '#f59e0b',
+                        isUltimate: true
+                    });
+                }
+                playSound('ultimate');
+                createExplosion(jet.x, jet.y - 50, '#f59e0b', 40);
+                addFloatingText(jet.x, jet.y - 60, "ULTIMATE BLAST!", "#f59e0b");
+            }
+        }
+
+        // -------------------------------------------------------------
+        // VISUAL EFFECTS (Particles & Floating Text)
+        // -------------------------------------------------------------
+        function createExplosion(x, y, color, count = 20) {
+            for (let i = 0; i < count; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 6 + 2;
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    radius: Math.random() * 4 + 2,
+                    color: color,
+                    alpha: 1,
+                    decay: Math.random() * 0.03 + 0.015
+                });
+            }
+        }
+
+        function addFloatingText(x, y, text, color) {
+            floatingTexts.push({
+                x: x,
+                y: y,
+                text: text,
+                color: color,
+                alpha: 1,
+                vy: -2
+            });
+        }
+
+        // -------------------------------------------------------------
+        // GAME RENDERING & LOOP
+        // -------------------------------------------------------------
+        function gameLoop() {
+            if (!isGameRunning) return;
+
+            // 1. Draw Webcam Mirror Background
+            ctx.save();
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(webcamElement, 0, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            // Dark semi-transparent overlay for contrast
+            ctx.fillStyle = 'rgba(3, 7, 18, 0.65)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 2. Smooth Jet Motion (Linear Interpolation)
+            jet.x += (jet.targetX - jet.x) * 0.15;
+            jet.y += (jet.targetY - jet.y) * 0.15;
+            jet.angle = (jet.targetX - jet.x) * 0.02; // Bank angle when turning
+
+            // 3. Process Pose Controls
+            if (poseData.detected) {
+                if (poseData.isRightHandRaised) {
+                    fireBullet();
+                }
+                if (poseData.isCrossedHands) {
+                    triggerUltimateAttack();
+                }
+            }
+
+            // 4. Render AR Skeleton Visuals
+            renderAROverlay();
+
+            // 5. Update & Draw Bullets
+            bullets.forEach((b, index) => {
+                b.x += b.vx;
+                b.y += b.vy;
+
+                // Bullet visual glow
+                ctx.save();
+                ctx.shadowBlur = b.isUltimate ? 15 : 8;
+                ctx.shadowColor = b.color;
+                ctx.fillStyle = b.color;
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, b.isUltimate ? 6 : 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+
+                // Remove offscreen bullets
+                if (b.y < -20) bullets.splice(index, 1);
+            });
+
+            // 6. Update & Draw Math Targets (Balloons)
+            for (let tIndex = targets.length - 1; tIndex >= 0; tIndex--) {
+                const t = targets[tIndex];
+                t.y += t.speed;
+                t.wobble += 0.05;
+                const renderX = t.x + Math.sin(t.wobble) * 12;
+
+                // Draw Target Sphere / Orb
+                ctx.save();
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = `hsl(${t.colorHue}, 90%, 60%)`;
+                
+                // Radial Gradient Balloon Effect
+                const grad = ctx.createRadialGradient(renderX - 10, t.y - 10, 5, renderX, t.y, t.radius);
+                grad.addColorStop(0, `hsl(${t.colorHue}, 100%, 80%)`);
+                grad.addColorStop(1, `hsl(${t.colorHue}, 80%, 40%)`);
+                ctx.fillStyle = grad;
+
+                ctx.beginPath();
+                ctx.arc(renderX, t.y, t.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Render Math Number Text inside Target
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 28px Orbitron, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.shadowBlur = 4;
+                ctx.shadowColor = '#000000';
+                ctx.fillText(t.value, renderX, t.y);
+                ctx.restore();
+
+                // Collision Detection: Bullet vs Target Balloon
+                for (let bIndex = bullets.length - 1; bIndex >= 0; bIndex--) {
+                    const b = bullets[bIndex];
+                    const dist = Math.hypot(b.x - renderX, b.y - t.y);
+
+                    if (dist < t.radius + 8) {
+                        bullets.splice(bIndex, 1);
+
+                        if (t.isCorrect) {
+                            // CORRECT ANSWER HIT
+                            score += 10;
+                            chargePower = Math.min(100, chargePower + 25);
+                            document.getElementById('scoreText').innerText = score;
+                            document.getElementById('chargeBar').style.width = chargePower + '%';
+
+                            playSound('hit');
+                            createExplosion(renderX, t.y, '#10b981', 30);
+                            addFloatingText(renderX, t.y, "+10 BENAR!", '#10b981');
+
+                            // Level up check
+                            if (score % 50 === 0) {
+                                level++;
+                                document.getElementById('levelText').innerText = level;
+                                addFloatingText(canvas.width / 2, canvas.height / 2, `LEVEL ${level}!`, '#eab308');
+                            }
+
+                            // Generate Next Math Problem
+                            generateMathQuestion();
+                            break;
+                        } else {
+                            // WRONG ANSWER HIT
+                            playSound('wrong');
+                            createExplosion(renderX, t.y, '#f43f5e', 25);
+                            addFloatingText(renderX, t.y, "SALAH!", '#f43f5e');
+                            targets.splice(tIndex, 1);
+
+                            // Health Deduction
+                            handleWrongHit();
+                            break;
+                        }
+                    }
+                }
+
+                // Target reached bottom screen
+                if (t.y > canvas.height + 60) {
+                    if (t.isCorrect) {
+                        // Missed the correct answer
+                        handleWrongHit();
+                        generateMathQuestion();
+                        break;
+                    } else {
+                        targets.splice(tIndex, 1);
+                    }
+                }
+            }
+
+            // 7. Render Jet Fighter Aircraft
+            renderJetFighter(jet.x, jet.y, jet.angle);
+
+            // 8. Update & Draw Explosive Particles
+            particles.forEach((p, index) => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.alpha -= p.decay;
+
+                if (p.alpha <= 0) {
+                    particles.splice(index, 1);
+                } else {
+                    ctx.save();
+                    ctx.globalAlpha = p.alpha;
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+            });
+
+            // 9. Update & Draw Floating UI Texts
+            floatingTexts.forEach((ft, index) => {
+                ft.y += ft.vy;
+                ft.alpha -= 0.02;
+
+                if (ft.alpha <= 0) {
+                    floatingTexts.splice(index, 1);
+                } else {
+                    ctx.save();
+                    ctx.globalAlpha = ft.alpha;
+                    ctx.fillStyle = ft.color;
+                    ctx.font = 'black 22px Orbitron';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(ft.text, ft.x, ft.y);
+                    ctx.restore();
+                }
+            });
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // -------------------------------------------------------------
+        // DRAW JET FIGHTER AIRCRAFT (Vector Canvas Graphics)
+        // -------------------------------------------------------------
+        function renderJetFighter(x, y, bankAngle) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(bankAngle);
+
+            // Thruster Fire Trail animation
+            const thrusterHeight = 15 + Math.random() * 15;
+            const thrusterGrad = ctx.createLinearGradient(0, 20, 0, 20 + thrusterHeight);
+            thrusterGrad.addColorStop(0, '#06b6d4');
+            thrusterGrad.addColorStop(0.5, '#3b82f6');
+            thrusterGrad.addColorStop(1, 'transparent');
+
+            ctx.fillStyle = thrusterGrad;
+            ctx.beginPath();
+            ctx.moveTo(-10, 20);
+            ctx.lineTo(10, 20);
+            ctx.lineTo(0, 20 + thrusterHeight);
+            ctx.closePath();
+            ctx.fill();
+
+            // Main Wings
+            ctx.fillStyle = '#1e293b';
+            ctx.strokeStyle = '#06b6d4';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, -35); // Nose
+            ctx.lineTo(35, 15);  // Right Wing Tip
+            ctx.lineTo(12, 18);
+            ctx.lineTo(0, 25);   // Tail center
+            ctx.lineTo(-12, 18);
+            ctx.lineTo(-35, 15); // Left Wing Tip
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Cockpit Canopy Glass
+            const cockpitGrad = ctx.createLinearGradient(0, -20, 0, 5);
+            cockpitGrad.addColorStop(0, '#67e8f9');
+            cockpitGrad.addColorStop(1, '#0284c7');
+
+            ctx.fillStyle = cockpitGrad;
+            ctx.beginPath();
+            ctx.ellipse(0, -8, 6, 14, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Wing Tip Energy Cannons Glow
+            ctx.fillStyle = '#22d3ee';
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#06b6d4';
+            ctx.beginPath();
+            ctx.arc(-35, 15, 3, 0, Math.PI * 2);
+            ctx.arc(35, 15, 3, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        // -------------------------------------------------------------
+        // DRAW AR BODY SKELETON OVERLAY EFEK
+        // -------------------------------------------------------------
+        function renderAROverlay() {
+            if (!poseData.detected) return;
+
+            const rwX = poseData.rightWrist.x * canvas.width;
+            const rwY = poseData.rightWrist.y * canvas.height;
+            const lwX = poseData.leftWrist.x * canvas.width;
+            const lwY = poseData.leftWrist.y * canvas.height;
+
+            ctx.save();
+            ctx.lineWidth = 3;
+
+            // Draw Right Hand Shooting HUD Ring
+            ctx.strokeStyle = poseData.isRightHandRaised ? '#10b981' : '#06b6d4';
+            ctx.shadowBlur = 12;
+            ctx.shadowColor = ctx.strokeStyle;
+            ctx.beginPath();
+            ctx.arc(rwX, rwY, 28, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.fillStyle = ctx.strokeStyle;
+            ctx.font = 'bold 10px Orbitron';
+            ctx.textAlign = 'center';
+            ctx.fillText(poseData.isRightHandRaised ? "TEMBAK!" : "TANGAN KANAN", rwX, rwY - 35);
+
+            // Draw Left Hand Target Ring
+            ctx.strokeStyle = '#3b82f6';
+            ctx.shadowColor = '#3b82f6';
+            ctx.beginPath();
+            ctx.arc(lwX, lwY, 24, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Ultimate Attack Gesture Ring
+            if (poseData.isCrossedHands) {
+                ctx.strokeStyle = '#f59e0b';
+                ctx.shadowColor = '#f59e0b';
+                ctx.lineWidth = 5;
+                ctx.beginPath();
+                ctx.arc((rwX + lwX) / 2, (rwY + lwY) / 2, 50, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            ctx.restore();
+        }
+
+        // -------------------------------------------------------------
+        // LIVES & GAME OVER LOGIC
+        // -------------------------------------------------------------
+        function handleWrongHit() {
+            lives--;
+            updateLivesDisplay();
+
+            if (lives <= 0) {
+                isGameRunning = false;
+                document.getElementById('finalScore').innerText = score;
+                document.getElementById('gameOverScreen').classList.remove('hidden');
+            }
+        }
+
+        function updateLivesDisplay() {
+            const container = document.getElementById('livesContainer');
+            container.innerHTML = '';
+            for (let i = 0; i < 3; i++) {
+                if (i < lives) {
+                    container.innerHTML += `<i class="fa-solid fa-heart text-rose-500"></i>`;
+                } else {
+                    container.innerHTML += `<i class="fa-regular fa-heart text-gray-600"></i>`;
+                }
+            }
+        }
+
+        function restartGame() {
+            score = 0;
+            level = 1;
+            lives = 3;
+            chargePower = 0;
+            document.getElementById('scoreText').innerText = '0';
+            document.getElementById('levelText').innerText = '1';
+            document.getElementById('chargeBar').style.width = '0%';
+            updateLivesDisplay();
+
+            document.getElementById('gameOverScreen').classList.add('hidden');
+            isGameRunning = true;
+            generateMathQuestion();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // -------------------------------------------------------------
+        // EVENT LISTENERS
+        // -------------------------------------------------------------
+        document.getElementById('btnStart').addEventListener('click', () => {
+            initAudio();
+            document.getElementById('loadingStatus').classList.remove('hidden');
+            initPoseDetection();
+        });
+
+        document.getElementById('btnRestart').addEventListener('click', () => {
+            restartGame();
+        });
+
+    </script>
+</body>
+</html>
