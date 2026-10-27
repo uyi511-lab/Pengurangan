@@ -1,0 +1,2 @@
+# Pengurangan
+Game mudah diakses
